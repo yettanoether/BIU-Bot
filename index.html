@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BIU Bot</title>
+<script>
+
+// from https://stackoverflow.com/a/69904838/1623645
+function DamerauLevenshtein(prices, damerau) {
+  // 'prices' customisation of the edit costs by passing an object with optional 'insert', 'remove', 'substitute', and
+  // 'transpose' keys, corresponding to either a constant number, or a function that returns the cost. The default cost
+  // for each operation is 1. The price functions take relevant character(s) as arguments, should return numbers, and
+  // have the following form:
+  //
+  // insert: function (inserted) { return NUMBER; }
+  // remove: function (removed) { return NUMBER; }
+  // substitute: function (from, to) { return NUMBER; }
+  // transpose: function (backward, forward) { return NUMBER; }
+  //
+  // The damerau flag allows us to turn off transposition and only do plain Levenshtein distance.
+
+  if (damerau !== false) {
+    damerau = true;
+  }
+  if (!prices) {
+    prices = {};
+  }
+  let insert, remove, substitute, transpose;
+
+  switch (typeof prices.insert) {
+    case 'function':
+      insert = prices.insert;
+      break;
+    case 'number':
+      insert = function (c) {
+        return prices.insert;
+      };
+      break;
+    default:
+      insert = function (c) {
+        return 1;
+      };
+      break;
+  }
+
+  switch (typeof prices.remove) {
+    case 'function':
+      remove = prices.remove;
+      break;
+    case 'number':
+      remove = function (c) {
+        return prices.remove;
+      };
+      break;
+    default:
+      remove = function (c) {
+        return 1;
+      };
+      break;
+  }
+
+  switch (typeof prices.substitute) {
+    case 'function':
+      substitute = prices.substitute;
+      break;
+    case 'number':
+      substitute = function (from, to) {
+        return prices.substitute;
+      };
+      break;
+    default:
+      substitute = function (from, to) {
+        return 1;
+      };
+      break;
+  }
+
+  switch (typeof prices.transpose) {
+    case 'function':
+      transpose = prices.transpose;
+      break;
+    case 'number':
+      transpose = function (backward, forward) {
+        return prices.transpose;
+      };
+      break;
+    default:
+      transpose = function (backward, forward) {
+        return 1;
+      };
+      break;
+  }
+
+  function distance(down, across) {
+    across = across.toLowerCase();
+
+    // http://en.wikipedia.org/wiki/Damerau%E2%80%93Levenshtein_distance
+    let ds = [];
+    if (down === across) {
+      return 0;
+    } else {
+      down = down.split('');
+      down.unshift(null);
+      across = across.split('');
+      across.unshift(null);
+      down.forEach(function (d, i) {
+        if (!ds[i]) {
+          ds[i] = [];
+        }
+        across.forEach(function (a, j) {
+          if (i === 0 && j === 0) {
+            ds[i][j] = 0;
+          } else if (i === 0) {
+            // Empty down (i == 0) -> across[1..j] by inserting
+            ds[i][j] = ds[i][j - 1] + insert(a);
+          } else if (j === 0) {
+            // Down -> empty across (j == 0) by deleting
+            ds[i][j] = ds[i - 1][j] + remove(d);
+          } else {
+            // Find the least costly operation that turns the prefix down[1..i] into the prefix across[1..j] using
+            // already calculated costs for getting to shorter matches.
+            ds[i][j] = Math.min(
+              // Cost of editing down[1..i-1] to across[1..j] plus cost of deleting
+              // down[i] to get to down[1..i-1].
+              ds[i - 1][j] + remove(d),
+              // Cost of editing down[1..i] to across[1..j-1] plus cost of inserting across[j] to get to across[1..j].
+              ds[i][j - 1] + insert(a),
+              // Cost of editing down[1..i-1] to across[1..j-1] plus cost of substituting down[i] (d) with across[j]
+              // (a) to get to across[1..j].
+              ds[i - 1][j - 1] + (d === a ? 0 : substitute(d, a))
+            );
+            // Can we match the last two letters of down with across by transposing them? Cost of getting from
+            // down[i-2] to across[j-2] plus cost of moving down[i-1] forward and down[i] backward to match
+            // across[j-1..j].
+            if (damerau && i > 1 && j > 1 && down[i - 1] === a && d === across[j - 1]) {
+              ds[i][j] = Math.min(ds[i][j], ds[i - 2][j - 2] + (d === a ? 0 : transpose(d, down[i - 1])));
+            }
+          }
+        });
+      });
+      return ds[down.length - 1][across.length - 1];
+    }
+  }
+  return distance;
+}
+
+function say(word) {
+  var speak = new SpeechSynthesisUtterance();
+  speak.text = word;
+  speak.lang = "en-AU";
+  window.speechSynthesis.speak(speak);
+}
+
+</script>
+<style>
+
+.input-box {
+  font-size: 24pt;
+  font-family: sans-serif;
+  background: black;
+  color: white;
+  width: 300pt;
+  border: 2px lightblue solid;
+}
+
+.input-box:focus {
+  outline-width: 0;
+}
+
+.match-box {
+  margin-top: 10pt;
+  width: 300pt;
+}
+
+.link {
+  color: white;
+  text-decoration: none;
+}
+
+</style>
+</head>
+<body style="font-size: 24pt; font-family: sans-serif; background: black; color: white;">
+
+<img src="ask.jpg" style="width: 80pt;">
+
+<div>
+<form action="javascript:void(0);" autocomplete="off">
+<input autocomplete="false" name="hidden" type="text" style="display: none">
+<input type="text" id="input" class="input-box">
+</form>
+</div>
+
+<div>
+<div class="match-box">
+  <img src="read.jpg" id="match1-say" align="right" style="width: 40pt; z-index: 10;">
+  <span>
+    <a id="match1" href="https://kids.britannica.com/kids/search/dictionary?query=" target="_blank" class="link"></a>
+  </span>
+  <br clear="all">
+</div>
+<div class="match-box">
+  <img src="read.jpg" id="match2-say" align="right" style="width: 40pt; z-index: 10;">
+  <span>
+    <a id="match2" href="https://kids.britannica.com/kids/search/dictionary?query=" target="_blank" class="link"></a>
+  </span>
+  <br clear="all">
+</div>
+<div class="match-box">
+  <img src="read.jpg" id="match3-say" align="right" style="width: 40pt; z-index: 10;">
+  <span>
+    <a id="match3" href="https://kids.britannica.com/kids/search/dictionary?query=" target="_blank" class="link"></a>
+  </span>
+  <br clear="all">
+</div>
+<div class="match-box">
+  <img src="read.jpg" id="match4-say" align="right" style="width: 40pt; z-index: 10;">
+  <span>
+    <a id="match4" href="https://kids.britannica.com/kids/search/dictionary?query=" target="_blank" class="link"></a>
+  </span>
+  <br clear="all">
+</div>
+<div class="match-box">
+  <img src="read.jpg" id="match5-say" align="right" style="width: 40pt; z-index: 10;">
+  <span>
+    <a id="match5" href="https://kids.britannica.com/kids/search/dictionary?query=" target="_blank" class="link"></a>
+  </span>
+  <br clear="all">
+</div>
+</div>
+
+<div style="position: absolute; top: 0pt; right: 0pt; margin: 5pt; padding: 5pt;">
+<img src="logo.jpg" style="width: 100pt; margin-left: auto; margin-right: 0px; display: block;">
+
+<div style="border: solid lightblue 2px; margin: 5pt; margin-top: 15pt; padding: 5pt; padding-left: 15pt; font-size: 12pt; width: 200pt;">
+<p>Hi! Welcome to BIU Bot.
+
+<p>Type a word and enter.
+
+<p>Then click a word from the list to go the dictionary for it.
+
+<p>Or click the robot cat to hear it.
+</div>
+
+</div>
+
+<script>
+
+var distance = DamerauLevenshtein();
+
+var word_list = [];
+
+fetch("english-58k.json").then(function(response) {
+  return response.json();
+}).then(function(data) {
+  word_list = data;
+});
+
+function matches(word) {
+  var out = ["", "", "", "", ""];
+  var dst = [-1.0, -1.0, -1.0, -1.0, -1.0];
+  for (i in word_list) {
+    var item = word_list[i];
+    var d = distance(word, item);
+    if (out[0] === ""  ||  d < dst[0]) {
+      out[0] = item;
+      dst[0] = d;
+    }
+    else if (out[1] === ""  ||  d < dst[1]) {
+      out[1] = item;
+      dst[1] = d;
+    }
+    else if (out[2] === ""  ||  d < dst[2]) {
+      out[2] = item;
+      dst[2] = d;
+    }
+    else if (out[3] === ""  ||  d < dst[3]) {
+      out[3] = item;
+      dst[3] = d;
+    }
+    else if (out[4] === ""  ||  d < dst[4]) {
+      out[4] = item;
+      dst[4] = d;
+    }
+  }
+  return out;
+}
+
+var input = document.getElementById("input");
+var match1 = document.getElementById("match1");
+var match2 = document.getElementById("match2");
+var match3 = document.getElementById("match3");
+var match4 = document.getElementById("match4");
+var match5 = document.getElementById("match5");
+
+input.addEventListener("keyup", function (event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    var m = matches(input.value.toLowerCase().trim());
+    match1.href = "https://kids.britannica.com/kids/search/dictionary?query=" + m[0];
+    match2.href = "https://kids.britannica.com/kids/search/dictionary?query=" + m[1];
+    match3.href = "https://kids.britannica.com/kids/search/dictionary?query=" + m[2];
+    match4.href = "https://kids.britannica.com/kids/search/dictionary?query=" + m[3];
+    match5.href = "https://kids.britannica.com/kids/search/dictionary?query=" + m[4];
+    match1.innerText = m[0];
+    match2.innerText = m[1];
+    match3.innerText = m[2];
+    match4.innerText = m[3];
+    match5.innerText = m[4];
+  }
+});
+
+document.getElementById("match1-say").addEventListener("click", function() { say(match1.innerText); });
+document.getElementById("match2-say").addEventListener("click", function() { say(match2.innerText); });
+document.getElementById("match3-say").addEventListener("click", function() { say(match3.innerText); });
+document.getElementById("match4-say").addEventListener("click", function() { say(match4.innerText); });
+document.getElementById("match5-say").addEventListener("click", function() { say(match5.innerText); });
+
+</script>
+</body>
+</html>
